@@ -99,6 +99,8 @@ irqreturn_t decon_int_irq_handler(int irq, void *dev_data)
 			VIDINTCON1_INT_FRAME);
 
 		if (decon->pdata->psr_mode == DECON_VIDEO_MODE) {
+			decon->vsync_last_hw = timestamp;
+			decon->vsync_fallback_forced = false;
 			decon->vsync_info.timestamp = timestamp;
 			wake_up_interruptible_all(&decon->vsync_info.wait);
 		}
@@ -756,6 +758,8 @@ irqreturn_t decon_fb_isr_for_eint(int irq, void *dev_id)
 	}
 #endif
 
+	decon->vsync_last_hw = timestamp;
+	decon->vsync_fallback_forced = false;
 	decon->vsync_info.timestamp = timestamp;
 	wake_up_interruptible_all(&decon->vsync_info.wait);
 

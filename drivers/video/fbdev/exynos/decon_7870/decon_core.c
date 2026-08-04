@@ -74,6 +74,95 @@ static void decon_set_protected_content(struct decon_device *decon,
 static atomic_t extra_vsync_wait;
 #endif /* CCONFIG_USE_VSYNC_SKIP */
 
+#define DECON_VSYNC_FALLBACK_DEFAULT_FPS 59
+#define DECON_VSYNC_FALLBACK_MISS_CNT 3
+
+static bool decon_vsync_panel_absent(struct decon_device *decon)
+{
+	struct dsim_device *dsim;
+
+	if (decon->out_type != DECON_OUT_DSI || !decon->output_sd)
+		return true;
+
+	dsim = container_of(decon->output_sd, struct dsim_device, sd);
+	return !dsim->priv.lcdconnected;
+}
+
+static ktime_t decon_vsync_fallback_get_period(struct decon_device *decon)
+{
+	unsigned int fps = 0;
+
+	if (decon->lcd_info)
+		fps = decon->lcd_info->fps;
+	if (!fps)
+		fps = DECON_VSYNC_FALLBACK_DEFAULT_FPS;
+
+	return ktime_set(0, (s64)NSEC_PER_SEC / fps);
+}
+
+static enum hrtimer_restart decon_vsync_fallback_timer_fn(struct hrtimer *timer)
+{
+	struct decon_device *decon =
+		container_of(timer, struct decon_device, vsync_fallback_timer);
+	ktime_t now = ktime_get();
+	ktime_t period = decon->vsync_fallback_period;
+	ktime_t last_hw;
+	bool forced;
+	bool emit = false;
+	s64 period_ns;
+
+	if (!atomic_read(&decon->vsync_fallback_running))
+		return HRTIMER_NORESTART;
+
+	if (decon->state == DECON_STATE_OFF || decon->state == DECON_STATE_LPD) {
+		atomic_set(&decon->vsync_fallback_running, 0);
+		return HRTIMER_NORESTART;
+	}
+
+	spin_lock(&decon->slock);
+	last_hw = decon->vsync_last_hw;
+	forced = decon->vsync_fallback_forced;
+	spin_unlock(&decon->slock);
+
+	if (decon_vsync_panel_absent(decon) || forced) {
+		emit = true;
+	} else {
+		period_ns = ktime_to_ns(period);
+		if (period_ns > 0) {
+			s64 delta_ns = ktime_to_ns(ktime_sub(now, last_hw));
+			if (ktime_to_ns(last_hw) == 0 ||
+			    delta_ns > (period_ns * DECON_VSYNC_FALLBACK_MISS_CNT))
+				emit = true;
+		}
+	}
+
+	if (emit) {
+		spin_lock(&decon->slock);
+		decon->vsync_info.timestamp = now;
+		spin_unlock(&decon->slock);
+		wake_up_interruptible_all(&decon->vsync_info.wait);
+	}
+
+	hrtimer_forward_now(timer, period);
+	return HRTIMER_RESTART;
+}
+
+static void decon_vsync_fallback_start(struct decon_device *decon)
+{
+	decon->vsync_fallback_period = decon_vsync_fallback_get_period(decon);
+
+	if (atomic_cmpxchg(&decon->vsync_fallback_running, 0, 1) == 0)
+		hrtimer_start(&decon->vsync_fallback_timer,
+			      decon->vsync_fallback_period,
+			      HRTIMER_MODE_REL);
+}
+
+static void decon_vsync_fallback_stop(struct decon_device *decon)
+{
+	if (atomic_cmpxchg(&decon->vsync_fallback_running, 1, 0) == 1)
+		hrtimer_cancel(&decon->vsync_fallback_timer);
+}
+
 #define SYSTRACE_C_BEGIN(a) do { \
 	decon->tracing_mark_write(decon->systrace_pid, 'C', a, 1);	\
 	} while(0)
@@ -1060,6 +1149,10 @@ int decon_enable(struct decon_device *decon)
 	}
 
 	decon->state = DECON_STATE_ON;
+	decon->vsync_last_hw = ktime_set(0, 0);
+	decon->vsync_fallback_forced = false;
+	if (decon_vsync_panel_absent(decon))
+		decon_vsync_fallback_start(decon);
 #ifdef CONFIG_LCD_DOZE_MODE
 	if (is_lcd_on) {
 		decon_info("%s: doze_state: %d\n", __func__, decon->doze_state);
@@ -1115,6 +1208,7 @@ int decon_disable(struct decon_device *decon)
 	}
 
 	flush_kthread_worker(&decon->update_regs_worker);
+	decon_vsync_fallback_stop(decon);
 
 
 	if (decon->pdata->psr_mode != DECON_VIDEO_MODE) {
@@ -1272,6 +1366,7 @@ static void decon_activate_vsync(struct decon_device *decon)
 				decon_err("%s: failed to enable dsim vsync int %s\n",
 						__func__, decon->output_sd->name);
 		}
+		decon_vsync_fallback_start(decon);
 		DISP_SS_EVENT_LOG(DISP_EVT_ACT_VSYNC, &decon->sd, ktime_set(0, 0));
 	}
 
@@ -1298,6 +1393,8 @@ static void decon_deactivate_vsync(struct decon_device *decon)
 				decon_err("%s: failed to disable dsim vsync int %s\n",
 						__func__, decon->output_sd->name);
 		}
+		if (!decon_vsync_panel_absent(decon))
+			decon_vsync_fallback_stop(decon);
 		DISP_SS_EVENT_LOG(DISP_EVT_DEACT_VSYNC, &decon->sd, ktime_set(0, 0));
 	}
 
@@ -1308,6 +1405,7 @@ int decon_wait_for_vsync(struct decon_device *decon, u32 timeout)
 {
 	ktime_t timestamp;
 	int ret;
+	s64 retry_ms;
 
 	if (decon->pdata->psr_mode == DECON_MIPI_COMMAND_MODE && decon->ignore_vsync)
 		goto wait_exit;
@@ -1324,6 +1422,21 @@ int decon_wait_for_vsync(struct decon_device *decon, u32 timeout)
 		ret = wait_event_interruptible(decon->vsync_info.wait,
 				!ktime_equal(timestamp,
 						decon->vsync_info.timestamp));
+	}
+
+	if (timeout && ret == 0 && decon_vsync_panel_absent(decon)) {
+		spin_lock(&decon->slock);
+		decon->vsync_fallback_forced = true;
+		spin_unlock(&decon->slock);
+		decon_vsync_fallback_start(decon);
+
+		retry_ms = 2 * ktime_to_ms(decon->vsync_fallback_period);
+		if (retry_ms < 1)
+			retry_ms = 1;
+		ret = wait_event_interruptible_timeout(decon->vsync_info.wait,
+				!ktime_equal(timestamp,
+						decon->vsync_info.timestamp),
+				msecs_to_jiffies((u32)retry_ms));
 	}
 
 	decon_deactivate_vsync(decon);
@@ -2956,6 +3069,10 @@ int decon_doze_enable(struct decon_device *decon)
 	}
 
 	decon->state = DECON_STATE_ON;
+	decon->vsync_last_hw = ktime_set(0, 0);
+	decon->vsync_fallback_forced = false;
+	if (decon_vsync_panel_absent(decon))
+		decon_vsync_fallback_start(decon);
 	decon->doze_state = DOZE_STATE_DOZE;
 	call_panel_ops(dsim, displayon, dsim);
 
@@ -4178,6 +4295,13 @@ static int decon_probe(struct platform_device *pdev)
 	init_waitqueue_head(&decon->wait_frmdone);
 	init_waitqueue_head(&decon->wait_vstatus);
 	mutex_init(&decon->vsync_info.irq_lock);
+	hrtimer_init(&decon->vsync_fallback_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	decon->vsync_fallback_timer.function = decon_vsync_fallback_timer_fn;
+	decon->vsync_last_hw = ktime_set(0, 0);
+	decon->vsync_fallback_period =
+		ktime_set(0, (s64)NSEC_PER_SEC / DECON_VSYNC_FALLBACK_DEFAULT_FPS);
+	atomic_set(&decon->vsync_fallback_running, 0);
+	decon->vsync_fallback_forced = false;
 
 	snprintf(device_name, MAX_NAME_SIZE, "decon%d", DECON_INT);
 	decon->timeline = sw_sync_timeline_create(device_name);

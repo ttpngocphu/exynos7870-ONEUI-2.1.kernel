@@ -14,6 +14,7 @@
 
 #include <linux/fb.h>
 #include <linux/kernel.h>
+#include <linux/hrtimer.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/wait.h>
@@ -659,6 +660,11 @@ struct decon_device {
 	struct mutex			mutex;
 	spinlock_t			slock;
 	struct decon_vsync		vsync_info;
+	struct hrtimer			vsync_fallback_timer;
+	ktime_t				vsync_fallback_period;
+	ktime_t				vsync_last_hw;
+	atomic_t			vsync_fallback_running;
+	bool				vsync_fallback_forced;
 	enum decon_state        	state;
 	enum decon_output_type		out_type;
 	int				mic_enabled;
