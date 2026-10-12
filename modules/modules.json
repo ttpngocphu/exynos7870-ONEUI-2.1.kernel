@@ -1,0 +1,74 @@
+[
+  {
+    "installDevice": [
+      "SamsungS9v10",
+      "SamsungS9v12",
+      "SamsungS9v13",
+      "SamsungS9v16",
+      "SamsungS9Plusv10",
+      "SamsungS9Plusv12",
+      "Pixel3av12",
+      "Pixel3av13",
+      "Pixel4XLv12"
+    ],
+    "enabled": "true",
+    "remove": "false",
+    "name": "Zygisk Next",
+    "web": "true",
+    "id": "zygisksu",
+    "version": "1.2.8 (512-4b5d6ad-release)",
+    "updateJson": "https://api.nullptr.icu/android/zygisk-next/static/update.json",
+    "update": "false",
+    "versionCode": "512",
+    "author": "Nullptr, 5ec1cff",
+    "description": "[✅Zygote64 Injected. ✅Zygote32 Injected. Root: ✅KernelSU (11838)] Standalone implementation of Zygisk."
+  },
+  {
+    "installDevice": [
+      "SamsungS9v10",
+      "SamsungS9v12",
+      "SamsungS9v13",
+      "SamsungS9v16",
+      "SamsungS9Plusv10",
+      "SamsungS9Plusv12",
+      "Pixel3av12",
+      "Pixel3av13",
+      "Pixel4XLv12"
+    ],
+    "updateJson": "https://raw.githubusercontent.com/beakthoven/TrickyStoreOSS/changelog/update.json",
+    "name": "Tricky Store OSS",
+    "remove": "false",
+    "version": "v2.1.0 (41-b8b03e4-release)",
+    "update": "false",
+    "id": "tricky_store",
+    "description": "A trick of keystore but open source.",
+    "enabled": "true",
+    "web": "false",
+    "author": "beakthoven",
+    "versionCode": "214001"
+  },
+  {
+    "installDevice": [
+      "SamsungS9v10",
+      "SamsungS9v12",
+      "SamsungS9v13",
+      "SamsungS9v16",
+      "SamsungS9Plusv10",
+      "SamsungS9Plusv12",
+      "Pixel3av12",
+      "Pixel3av13",
+      "Pixel4XLv12"
+    ],
+    "name": "Play Integrity Fix",
+    "description": "Universal modular fix for Play Integrity (and SafetyNet) on devices running Android 8-15",
+    "updateJson": "https://raw.githubusercontent.com/chiteroman/PlayIntegrityFix/main/update.json",
+    "version": "v214001",
+    "enabled": "true",
+    "versionCode": "214001",
+    "update": "false",
+    "remove": "false",
+    "id": "playintegrityfix",
+    "web": "false",
+    "author": "OneChanger"
+  }
+]

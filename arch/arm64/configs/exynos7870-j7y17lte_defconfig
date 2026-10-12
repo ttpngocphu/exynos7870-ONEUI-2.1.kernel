@@ -4941,3 +4941,15 @@ CONFIG_ARCH_HAS_SG_CHAIN=y
 
 # Additional configs
 CONFIG_DYNAMIC_FSYNC=y
+
+# KernelSU Next
+
+# KernelSU-Next built-in driver with MANUAL 3-in-1 hooks (reboot + setresuid + execveat)
+CONFIG_KSU=y
+CONFIG_KSU_MANUAL_HOOK=y
+# Kprobes hook disabled on Exynos7870 oneui2.1: manual hooks already wired.
+# CONFIG_KSU_KPROBES_HOOK is not set
+# Debug off, manager/policy integration enabled.
+# CONFIG_KSU_DEBUG is not set
+# CONFIG_KSU_DISABLE_MANAGER is not set
+# CONFIG_KSU_DISABLE_POLICY is not set
